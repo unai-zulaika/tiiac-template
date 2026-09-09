@@ -6,6 +6,9 @@ on:
 
 jobs:
   reproducibilidad:
+    # En la plantilla no se ejecuta: esta incompleta a proposito y saldria
+    # siempre en rojo. En vuestro repositorio si corre.
+    if: github.repository != 'unai-zulaika/tiiac-template'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -22,7 +25,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Tests
-        run: pytest tests/ -q
+        run: python -m pytest tests/ -q
 
       - name: Comprobador de reproducibilidad
         run: python tools/tiiac_check.py .
