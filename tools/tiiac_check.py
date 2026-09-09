@@ -70,6 +70,24 @@ def lee(p: Path) -> str:
         return ""
 
 
+def versionados(raiz: Path):
+    """Ficheros que git tiene registrados, o None si no es un repositorio.
+
+    Se usa en vez de recorrer el disco porque lo que importa es que hay EN el
+    repositorio, no que hay en la carpeta. Un .venv con pesos de PyTorch dentro
+    no es un problema: no esta versionado.
+    """
+    try:
+        pr = subprocess.run(["git", "--no-optional-locks", "-C", str(raiz), "ls-files"],
+                            capture_output=True, text=True, timeout=10,
+                            encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if pr.returncode != 0:
+        return None
+    return [l.strip() for l in (pr.stdout or "").splitlines() if l.strip()]
+
+
 def ficheros_py(raiz: Path) -> list[Path]:
     saltar = {".git", "venv", ".venv", "__pycache__", "wandb", "data",
               ".mypy_cache", "node_modules", ".ipynb_checkpoints"}
@@ -105,21 +123,23 @@ def check_estructura(raiz: Path) -> Resultado:
     else:
         r.fallo("falta src/ con codigo fuente (no todo puede vivir en run.py)")
 
-    # basura que no deberia estar versionada, y que el .gitignore no cubre
-    ignorados = lee(raiz / ".gitignore")
-    basura = []
-    for patron in ("__pycache__", ".mypy_cache", ".ipynb_checkpoints", "wandb"):
-        encontrados = [p for p in raiz.rglob(patron) if ".git" not in p.parts]
-        if encontrados and patron not in ignorados:
-            basura.append(patron)
-    pesados = [p for p in raiz.rglob("*")
-               if p.is_file() and p.suffix in {".pt", ".pth", ".ckpt", ".h5", ".onnx"}
-               and ".git" not in p.parts]
-    if basura:
-        r.ojo(f"hay directorios de cache en el arbol: {', '.join(basura)} "
-              f"(comprueba que .gitignore los cubre)")
-    if pesados:
-        r.ojo(f"hay {len(pesados)} checkpoint(s) en el arbol; los pesos no van al repositorio")
+    # Basura versionada. Se mira SOLO lo que git tiene registrado: si esta
+    # ignorado o vive en .venv, no esta en el repositorio y no es problema.
+    seguidos = versionados(raiz)
+    if seguidos is None:
+        r.ojo("no es un repositorio git, asi que no se puede comprobar que hay versionado")
+    else:
+        pesados = [f for f in seguidos
+                   if f.rsplit(".", 1)[-1].lower() in {"pt", "pth", "ckpt", "h5", "onnx"}]
+        cache = sorted({c for c in ("__pycache__", ".mypy_cache", ".ipynb_checkpoints",
+                                    "wandb", ".venv", "venv")
+                        for f in seguidos if f.split("/")[0] == c or f"/{c}/" in f"/{f}"})
+        if pesados:
+            r.ojo(f"hay {len(pesados)} fichero(s) de pesos versionados: "
+                  f"{', '.join(pesados[:3])}. Los pesos no van al repositorio")
+        if cache:
+            r.ojo(f"hay ficheros de cache versionados: {', '.join(cache)}. "
+                  f"Anadelos al .gitignore y quitalos con git rm -r --cached")
 
     return r.cerrar()
 
